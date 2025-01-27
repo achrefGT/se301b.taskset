@@ -54,9 +54,6 @@ sporadic_thread_config_t [task.name.normalize()/]_info;
 
 
 [for ( port : Port | task.connectedInputPorts() ) ] 
-[port.qualifiedName/]
-[port.connection.qualifiedName/]
-[port.connection.queueMaxSize/]
 [port.dataType.toString().normalizeType()/] [task.name.normalize()/]_q_port1_content['['/][port.connection.queueMaxSize/][']'/] = { [listOf('0', port.connection.queueMaxSize)/] };
 port_queue_t [task.name.normalize()/]_q_port1 = { 5, -1, -1, 0, sizeof(char), [task.name.normalize()/]_q_port1_content };
 [/for]
