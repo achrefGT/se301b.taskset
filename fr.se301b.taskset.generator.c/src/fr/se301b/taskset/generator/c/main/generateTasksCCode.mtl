@@ -46,10 +46,18 @@ thread_config_t [task.name.normalize()/]_info = { [task.period/], 0 };
 [else] 
 pthread_mutex_t [task.name.normalize()/]_q_rez; 
 pthread_cond_t [task.name.normalize()/]_q_event; 
+[if task.kind = ThreadKind::periodic ] 
+thread_config_t [task.name.normalize()/]_info; 
+[else] 
 sporadic_thread_config_t [task.name.normalize()/]_info; 
+[/if]
+
 
 [for ( port : Port | task.connectedInputPorts() ) ] 
-[port.dataType.toString().normalizeType()/] [task.name.normalize()/]_q_port1_content['['/][port.connection.queueMaxSize/][']'/] = { [listOf('0', 5)/] };
+[port.qualifiedName/]
+[port.connection.qualifiedName/]
+[port.connection.queueMaxSize/]
+[port.dataType.toString().normalizeType()/] [task.name.normalize()/]_q_port1_content['['/][port.connection.queueMaxSize/][']'/] = { [listOf('0', port.connection.queueMaxSize)/] };
 port_queue_t [task.name.normalize()/]_q_port1 = { 5, -1, -1, 0, sizeof(char), [task.name.normalize()/]_q_port1_content };
 [/for]
 thread_queue_t [task.name.normalize()/]_q = { &[task.name.normalize()/]_q_rez, &[task.name.normalize()/]_q_event, (union thread_config*) &[task.name.normalize()/]_info,
@@ -58,7 +66,11 @@ thread_queue_t [task.name.normalize()/]_q = { &[task.name.normalize()/]_q_rez, &
 [/for] };
 
 struct timespec [task.name.normalize()/]_timespec;
-sporadic_thread_config_t [task.name.normalize()/]_info = { 6000, &[task.name.normalize()/]_timespec, &[task.name.normalize()/]_q, 0 };
+[if task.kind = ThreadKind::periodic ] 
+thread_config_t [task.name.normalize()/]_info = { [task.period/], &[task.name.normalize()/]_timespec, &[task.name.normalize()/]_q, 0 };
+[else] 
+sporadic_thread_config_t [task.name.normalize()/]_info = { [task.minimumDelay/], &[task.name.normalize()/]_timespec, &[task.name.normalize()/]_q, 0 };
+[/if]
 [/if]
 
 
