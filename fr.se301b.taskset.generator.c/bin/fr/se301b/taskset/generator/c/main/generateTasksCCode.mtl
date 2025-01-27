@@ -1,0 +1,231 @@
+[comment encoding = UTF-8 /]
+[**
+ * The documentation of the module  generateTasksCCode.
+ */]
+[module  generateTasksCCode('http://www.example.org/taskset')]
+
+
+[**
+ * The documentation of the template  generateTasksCCode.
+ * @param aTaskSet
+ */]
+[template public  generateTasksCCode(aTaskSet : TaskSet)]
+[comment @main/]
+[file (aTaskSet.name + '.c', false, 'UTF-8')] 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#define __USE_UNIX98
+#include <pthread.h>
+#include <sched.h>
+#include <errno.h>
+
+#include "threads_dispatch.h"
+#include "threads_ports.h"
+
+unsigned int get_time_ns();
+void simulate_exec_time(unsigned int exec_time_ns);
+
+pthread_mutex_t start_barrier_mutex;
+pthread_cond_t start_barrier_cond;
+pthread_cond_t main_barrier_cond;
+
+char reached_barrier = 0;
+
+#define NB_THREADS [aTaskSet.tasks->size()/]
+
+[for ( task : Task | aTaskSet.tasks ) ] 
+void [task.name.normalize()/]_body(); 
+[if task.kind = ThreadKind::periodic ] 
+// Initialization of data for task [task.name/] (periodic, period = [task.period/] ms) 
+[else] 
+// Initialization of data for task [task.name/] (sporadic, minimum delay = [task.minimumDelay/] ms) 
+[/if]
+[if task.connectedInputPorts()->isEmpty() ] 
+thread_config_t [task.name.normalize()/]_info = { [task.period/], 0 }; 
+[else] 
+pthread_mutex_t [task.name.normalize()/]_q_rez; 
+pthread_cond_t [task.name.normalize()/]_q_event; 
+sporadic_thread_config_t [task.name.normalize()/]_info; 
+
+[for ( port : Port | task.connectedInputPorts() ) ] 
+[port.dataType.toString().normalizeType()/] [task.name.normalize()/]_q_port1_content['['/][port.connection.queueMaxSize/][']'/] = { [listOf('0', 5)/] };
+port_queue_t [task.name.normalize()/]_q_port1 = { 5, -1, -1, 0, sizeof(char), [task.name.normalize()/]_q_port1_content };
+[/for]
+thread_queue_t [task.name.normalize()/]_q = { &[task.name.normalize()/]_q_rez, &[task.name.normalize()/]_q_event, (union thread_config*) &[task.name.normalize()/]_info,
+		0, 0, { [for ( port : Port | task.connectedInputPorts() ) ] 
+&[task.name.normalize()/]_q_port1, }
+[/for] };
+
+struct timespec [task.name.normalize()/]_timespec;
+sporadic_thread_config_t [task.name.normalize()/]_info = { 6000, &[task.name.normalize()/]_timespec, &[task.name.normalize()/]_q, 0 };
+[/if]
+
+
+[/for] 
+
+int main(int argc, char *argv ['['/] [']'/]) {
+	int max_prio = sched_get_priority_max(SCHED_FIFO);
+	int min_prio = sched_get_priority_min(SCHED_FIFO);
+	int prio = min_prio;
+
+	pthread_t thId = pthread_self();
+	pthread_setschedprio(thId, min_prio); // we put the main thread at
+	// the min prio to make sure
+	// other threads start as soon
+	// as they are ready (no
+	// preemtion of T1, T2, and T3
+	// by the main thread).
+
+	pthread_mutex_init(&start_barrier_mutex, NULL);
+	pthread_cond_init(&start_barrier_cond, NULL);
+	pthread_cond_init(&main_barrier_cond, NULL);
+
+	[for ( task : Task | aTaskSet.tasks ) ]
+	pthread_t [task.name.normalize()/]_tid;
+	create_fp_thread(++prio, 40960, (void*) [task.name.normalize()/]_body, &[task.name.normalize()/]_tid, SCHED_FIFO); 
+	[if task.kind = ThreadKind::periodic ] 
+	init_periodic_config(&[task.name.normalize()/]_info);
+	[else]
+	init_sporadic_config((thread_config_t*) &[task.name.normalize()/]_info);
+	[/if]
+
+	[/for]
+
+
+	pthread_mutex_lock(&start_barrier_mutex);
+	while (reached_barrier < NB_THREADS) {
+		pthread_cond_wait(&main_barrier_cond, &start_barrier_mutex);
+	}
+	pthread_mutex_unlock(&start_barrier_mutex);
+
+	set_start_time();
+
+	pthread_cond_broadcast(&start_barrier_cond);
+
+	[for ( task : Task | aTaskSet.tasks ) ]
+	pthread_join([task.name.normalize()/]_tid, NULL);
+	[/for]
+
+}
+
+[for ( task : Task | aTaskSet.tasks ) ]
+void [task.name.normalize()/]_body() {
+	pthread_mutex_lock(&start_barrier_mutex);
+	reached_barrier++;
+	pthread_cond_signal(&main_barrier_cond);
+	pthread_cond_wait(&start_barrier_cond, &start_barrier_mutex);
+	pthread_mutex_unlock(&start_barrier_mutex);
+
+	while (1) {
+[if task.kind = ThreadKind::periodic ] 
+		display_relative_date("Start thread [task.name.normalize()/]",
+				([task.name.normalize()/]_info.periodic_config).iteration_counter);
+
+		[task.behavior/]
+
+		simulate_exec_time([task.period * 2000000 / 5/]); // [task.period * 2 / 5/] ms;
+
+		printf("Finish thread [task.name.normalize()/]\n");
+
+
+	[for ( port : Port | task.connectedOutputPorts() ) ] 
+		static char c = 0;
+		c++;
+		SendOutput_runtime(&[port.connection.inputPort.task.name.normalize()/]_q, 0, &c);
+	[/for]
+	[for ( port : Port | task.connectedInputPorts() ) ] 
+		char c;
+		GetValue_runtime([task.name.normalize()/]_info.global_q, 0, &c);
+		printf("[task.name.normalize()/], received data: %d\n", c);
+	[/for]
+
+		await_periodic_dispatch(&[task.name.normalize()/]_info);
+
+[else] 
+		StatusType status = await_sporadic_dispatch([task.name.normalize()/]_info.global_q);
+		printf("Start thread [task.name.normalize()/]\n");
+
+	[for ( port : Port | task.connectedOutputPorts() ) ] 
+		static char c = 0;
+		c++;
+		SendOutput_runtime(&[port.connection.inputPort.task.name.normalize()/]_q, 0, &c);
+	[/for]
+	[for ( port : Port | task.connectedInputPorts() ) ] 
+		ReceiveInputs_runtime([task.name.normalize()/]_info.global_q, 0);
+
+		char c;
+		GetValue_runtime([task.name.normalize()/]_info.global_q, 0, &c);
+		printf("[task.name.normalize()/], received data: %d\n", c);
+	[/for]
+
+		[task.behavior/]
+
+		simulate_exec_time([task.minimumDelay * 1000000 / 3/]); // [task.minimumDelay / 3/] ms;
+
+		printf("Finish thread [task.name.normalize()/]\n");
+[/if]
+	}
+}
+[/for]
+
+
+// TODO review
+void simulate_exec_time(unsigned int exec_time_ns) {
+	unsigned int start_time_ns = get_time_ns();
+	char reached = 0;
+
+	while (!reached) {
+		unsigned int current_time_ns = get_time_ns();
+		if (current_time_ns - start_time_ns > exec_time_ns)
+			reached = 1;
+	}
+}
+
+unsigned int get_time_ns() {
+	struct timespec current_time;
+	clock_gettime(CLOCK_MONOTONIC, &current_time);
+
+	unsigned int current_time_ns = (current_time.tv_sec * 1000000000)
+			+ current_time.tv_nsec;
+	return current_time_ns;
+}
+
+[/file]
+[/template]
+
+[query public normalize( name : String ) : String = 
+self.replaceAll( '-', '_') 
+/]
+
+[query public normalizeType( dataType : String ) : String = 
+self.replaceAll( 'character', 'char') 
+/]
+
+[query private connections( port : Port ) : OrderedSet( Connection ) = 
+self.task.taskset.connection->select( con | con.inputPort = self or 
+con.outputPort = self ) 
+/] 
+[query private isConnected( port : Port ) : Boolean = 
+not self.connections()->isEmpty() 
+/] 
+[query private connectedInputPorts( task : Task ) : OrderedSet( Port ) = 
+self.ownedPorts->select( port | port.direction = PortDirection::IN )-> 
+select( port | port.isConnected() ) 
+/]
+[query private connectedOutputPorts( task : Task ) : OrderedSet( Port ) = 
+self.ownedPorts->select( port | port.direction = PortDirection::OUT )-> 
+select( port | port.isConnected() ) 
+/]
+[query private listOf(token: String, nbToken: Integer) : String = 
+    if nbToken = 1 then token else token + ', ' + self.listOf(token, nbToken - 1) endif
+/]
+
+
+
+
+
+
+
+
+
