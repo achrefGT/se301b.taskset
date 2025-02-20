@@ -55,7 +55,7 @@ sporadic_thread_config_t [task.name.normalize()/]_info;
 [let i : Integer = 1]
 [for ( port : Port | task.connectedInputPorts() ) ]
 [port.dataType.toString().normalizeType()/] [task.name.normalize()/]_q_port[i/]_content['['/][port.connection.queueMaxSize/][']'/] = { [listOf('0', port.connection.queueMaxSize)/] };
-port_queue_t [task.name.normalize()/]_q_port[i/] = { [port.connection.queueMaxSize/], -1, -1, 0, sizeof(char), [task.name.normalize()/]_q_port[i/]_content };
+port_queue_t [task.name.normalize()/]_q_port[i/] = { [port.connection.queueMaxSize/], -1, -1, 0, sizeof([port.dataType.toString().normalizeType()/]), [task.name.normalize()/]_q_port[i/]_content };
 [let i : Integer = i + 1][/let]
 [/for]
 [/let]
@@ -230,4 +230,12 @@ select( port | port.isConnected() )
 [query private listOf(token: String, nbToken: Integer) : String = 
     if nbToken = 1 then token else token + ', ' + self.listOf(token, nbToken - 1) endif
 /]
+
+
+
+
+
+
+
+
 
